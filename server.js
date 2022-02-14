@@ -11,6 +11,7 @@ const jwtSecret = 'husshh';
 const express = require('express');
 const User = require('./models/User');
 const Post = require('./models/Post');
+const Comment = require('./models/Comment');
 /*
 1 - Fork the repo
 2 - clone your repo after forking
@@ -47,9 +48,13 @@ const schema = buildSchema(`
     lastName: String!
     age: Int
   }
+  type Comment{
+    error:String
+    content:String
+  }
   type Post{
     error:String
-    comments:Array
+    comments:[Comment]
     content: String!
     user: User!
   }
@@ -57,6 +62,7 @@ const schema = buildSchema(`
     hello: String
     getMyPosts(token: String): [Post!]!
     getAllPosts: [Post!]!
+    getPostComments(postId:String):[Comment!]!
   }
   type Mutation{
     createUser(userData: UserRegistrationInput): User
@@ -64,6 +70,7 @@ const schema = buildSchema(`
     postCreate(token:String, content:String): String
     postUpdate(token:String,content:String,postId:String): Post
     postDelete(token:String,postId:String): String
+    commentCreate(token:String,postId:String,content:String):String
   }
 `);
 
@@ -155,22 +162,55 @@ const postsQuery = {
     },
 
     getAllPosts: async() => {
-        const posts = await Post.find({}).populate('userId');
+        const posts = await Post.find({})
+            .populate('userId')
+            .populate('comments');
         return posts.map((p) => ({...p.toJSON(), user: p.userId }));
     },
 };
 
+const commentsMutation = {
+    commentCreate: async({ token, postId, content }) => {
+        const user = await auth(token);
+        if (!user) return 'Authentication error';
+        // const userId = user.id;
+        const comment = new Comment({ postId, content });
+        try {
+            await comment.save();
+        } catch (err) {
+            return 'Error saving comment';
+        }
+        const relatedPost = await Post.findById({ _id: postId });
+        relatedPost.comments.push(comment);
+        await relatedPost.save(function(err) {
+            if (err) return "Comment Couldn't be saved";
+        });
+        return 'Comment Created Successfully';
+    },
+};
+const commentsQuery = {
+    getPostComments: async({ postId }) => {
+        let comments;
+        try {
+            comments = await Comment.find({ postId: postId });
+        } catch (err) {
+            return [{ error: 'Error Happened' }];
+        }
+        return comments;
+    },
+};
 const rootValue = {
     ...userMutations,
     ...postsMutation,
     ...postsQuery,
+    ...commentsMutation,
+    ...commentsQuery,
     hello: () => 'Hello world',
 };
 
 const app = express();
 
 app.use('/graph', graphqlHTTP({ schema, rootValue, graphiql: true }));
-
 app.listen(5000, () => {
     console.log('Server is runing');
 });
